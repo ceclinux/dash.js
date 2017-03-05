@@ -85,13 +85,17 @@ function ManifestLoader(config) {
             success: function (data, textStatus, xhr) {
                 var actualUrl;
                 var baseUri;
-
+                console.log('here');
+                console.log(data);
                 // Handle redirects for the MPD - as per RFC3986 Section 5.1.3
                 // also handily resolves relative MPD URLs to absolute
                 if (xhr.responseURL && xhr.responseURL !== url) {
+                    console.log('wawa');
                     baseUri = urlUtils.parseBaseUrl(xhr.responseURL);
                     actualUrl = xhr.responseURL;
+                    console.log('and here');
                 } else {
+                    console.log('haha');
                     // usually this case will be caught and resolved by
                     // xhr.responseURL above but it is not available for IE11
                     // baseUri must be absolute for BaseURL resolution later
@@ -101,9 +105,10 @@ function ManifestLoader(config) {
 
                     baseUri = urlUtils.parseBaseUrl(url);
                 }
-
+                console.log(data);
                 const manifest = parser.parse(data, xlinkController);
-
+                console.log('also here');
+                console.log(manifest);
                 if (manifest) {
                     manifest.url = actualUrl || url;
 

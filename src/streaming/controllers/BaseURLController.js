@@ -90,7 +90,7 @@ function BaseURLController() {
             } else {
                 return new BaseURL();
             }
-
+            console.log(p);
             return p;
         }, new BaseURL());
 

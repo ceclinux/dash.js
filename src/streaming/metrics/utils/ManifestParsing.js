@@ -9,6 +9,8 @@ function ManifestParsing (config) {
 
     function getMetricsRangeStartTime(manifest, dynamic, range) {
         var mpd = dashManifestModel.getMpd(manifest);
+        console.log('mpd');
+        console.log(mpd);
         var periods;
         var presentationStartTime = 0;
         var reportingStartTime;

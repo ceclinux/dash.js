@@ -28,10 +28,12 @@
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-import {HTTPRequest} from './vo/metrics/HTTPRequest';
+import { HTTPRequest } from './vo/metrics/HTTPRequest';
 import FactoryMaker from '../core/FactoryMaker';
 import MediaPlayerModel from './models/MediaPlayerModel';
 import ErrorHandler from './utils/ErrorHandler.js';
+import Events from './../core/events/Events';
+import EventBus from './../core/EventBus';
 
 /**
  * @module XHRLoader
@@ -40,7 +42,7 @@ import ErrorHandler from './utils/ErrorHandler.js';
  */
 function XHRLoader(cfg) {
     const context = this.context;
-
+    const eventBus = EventBus(context).getInstance();
     //const log = Debug(context).getInstance().log;
     const mediaPlayerModel = MediaPlayerModel(context).getInstance();
 
@@ -60,20 +62,22 @@ function XHRLoader(cfg) {
         retryTimers = [];
 
         downloadErrorToRequestTypeMap = {
-            [HTTPRequest.MPD_TYPE]:                         ErrorHandler.DOWNLOAD_ERROR_ID_MANIFEST,
-            [HTTPRequest.XLINK_EXPANSION_TYPE]:             ErrorHandler.DOWNLOAD_ERROR_ID_XLINK,
-            [HTTPRequest.INIT_SEGMENT_TYPE]:                ErrorHandler.DOWNLOAD_ERROR_ID_INITIALIZATION,
-            [HTTPRequest.MEDIA_SEGMENT_TYPE]:               ErrorHandler.DOWNLOAD_ERROR_ID_CONTENT,
-            [HTTPRequest.INDEX_SEGMENT_TYPE]:               ErrorHandler.DOWNLOAD_ERROR_ID_CONTENT,
+            [HTTPRequest.MPD_TYPE]: ErrorHandler.DOWNLOAD_ERROR_ID_MANIFEST,
+            [HTTPRequest.XLINK_EXPANSION_TYPE]: ErrorHandler.DOWNLOAD_ERROR_ID_XLINK,
+            [HTTPRequest.INIT_SEGMENT_TYPE]: ErrorHandler.DOWNLOAD_ERROR_ID_INITIALIZATION,
+            [HTTPRequest.MEDIA_SEGMENT_TYPE]: ErrorHandler.DOWNLOAD_ERROR_ID_CONTENT,
+            [HTTPRequest.INDEX_SEGMENT_TYPE]: ErrorHandler.DOWNLOAD_ERROR_ID_CONTENT,
             [HTTPRequest.BITSTREAM_SWITCHING_SEGMENT_TYPE]: ErrorHandler.DOWNLOAD_ERROR_ID_CONTENT,
-            [HTTPRequest.OTHER_TYPE]:                       ErrorHandler.DOWNLOAD_ERROR_ID_CONTENT
+            [HTTPRequest.OTHER_TYPE]: ErrorHandler.DOWNLOAD_ERROR_ID_CONTENT
         };
     }
 
     function internalLoad(config, remainingAttempts) {
 
         var request = config.request;
+        console.log('here');
         var xhr = new XMLHttpRequest();
+        console.log('there');
         var traces = [];
         var firstProgress = true;
         var needFailureReport = true;
@@ -107,40 +111,41 @@ function XHRLoader(cfg) {
                 );
             }
         };
-
         const onloadend = function () {
-            if (xhrs.indexOf(xhr) === -1) {
-                return;
-            } else {
-                xhrs.splice(xhrs.indexOf(xhr), 1);
-            }
+            // if (xhrs.indexOf(xhr) === -1) {
+            //     return;
+            // } else {
+            //     xhrs.splice(xhrs.indexOf(xhr), 1);
+            // }
 
-            if (needFailureReport) {
-                handleLoaded(false);
+            // if (needFailureReport) {
+            //     handleLoaded(false);
 
-                if (remainingAttempts > 0) {
-                    remainingAttempts--;
-                    retryTimers.push(
-                        setTimeout(function () {
-                            internalLoad(config, remainingAttempts);
-                        }, mediaPlayerModel.getRetryIntervalForType(request.type))
-                    );
-                } else {
-                    errHandler.downloadError(
-                        downloadErrorToRequestTypeMap[request.type],
-                        request.url,
-                        request
-                    );
+            //     if (remainingAttempts > 0) {
+            //         remainingAttempts--;
+            //         retryTimers.push(
+            //             setTimeout(function () {
+            //                 //config.request.url = config.request.url.replace(/^ccnx/i, 'http');
+            //                 console.log(config);
+            //                 internalLoad(config, remainingAttempts);
+            //             }, mediaPlayerModel.getRetryIntervalForType(request.type))
+            //         );
+            //     } else {
+            //         errHandler.downloadError(
+            //             downloadErrorToRequestTypeMap[request.type],
+            //             request.url,
+            //             request
+            //         );
 
-                    if (config.error) {
-                        config.error(request, 'error', xhr.statusText);
-                    }
+            //         // if (config.error) {
+            //         //     config.error(request, 'error', xhr.statusText);
+            //         // }
 
-                    if (config.complete) {
-                        config.complete(request, xhr.statusText);
-                    }
-                }
-            }
+            //         // if (config.complete) {
+            //         //     config.complete(request, xhr.statusText);
+            //         // }
+            //     }
+            // }
         };
 
         const progress = function (event) {
@@ -175,24 +180,25 @@ function XHRLoader(cfg) {
 
         const onload = function () {
             if (xhr.status >= 200 && xhr.status <= 299) {
-                handleLoaded(true);
-
+                //handleLoaded(true);
+                console.log(config.success);
                 if (config.success) {
+                    console.log('response');
+                    console.log(xhr);
                     config.success(xhr.response, xhr.statusText, xhr);
+
                 }
 
-                if (config.complete) {
-                    config.complete(request, xhr.statusText);
-                }
+                // if (config.complete) {
+                //     config.complete(request, xhr.statusText);
+                // }
             }
         };
 
         try {
             const modifiedUrl = requestModifier.modifyRequestURL(request.url);
             const verb = request.checkExistenceOnly ? 'HEAD' : 'GET';
-
             xhr.open(verb, modifiedUrl, true);
-
             if (request.responseType) {
                 xhr.responseType = request.responseType;
             }
@@ -206,9 +212,7 @@ function XHRLoader(cfg) {
             }
 
             xhr = requestModifier.modifyRequestHeader(xhr);
-
             xhr.withCredentials = mediaPlayerModel.getXHRWithCredentialsForType(request.type);
-
             xhr.onload = onload;
             xhr.onloadend = onloadend;
             xhr.onerror = onloadend;
@@ -218,12 +222,13 @@ function XHRLoader(cfg) {
             let now = new Date().getTime();
             if (isNaN(request.delayLoadingTime) || now >= request.delayLoadingTime) {
                 // no delay - just send xhr
-
+                console.log('still here?4');
                 xhrs.push(xhr);
-                xhr.send();
+                adaptor(config, xhr).send();
+                console.log('still here?5');
             } else {
                 // delay
-                let delayedXhr = {xhr: xhr};
+                let delayedXhr = { xhr: xhr };
                 delayedXhrs.push(delayedXhr);
                 delayedXhr.delayTimeout = setTimeout(function () {
                     if (delayedXhrs.indexOf(delayedXhr) === -1) {
@@ -245,6 +250,8 @@ function XHRLoader(cfg) {
         }
     }
 
+
+
     /**
      * Initiates a download of the resource described by config.request
      * @param {Object} config - contains request (FragmentRequest or derived type), and callbacks
@@ -252,6 +259,7 @@ function XHRLoader(cfg) {
      * @instance
      */
     function load(config) {
+        console.log(config.request);
         if (config.request) {
             internalLoad(
                 config,

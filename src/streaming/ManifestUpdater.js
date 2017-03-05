@@ -123,7 +123,8 @@ function ManifestUpdater() {
     }
 
     function update(manifest) {
-
+        console.log('update manifest');
+        console.log(manifest);
         manifestModel.setValue(manifest);
 
         const date = new Date();

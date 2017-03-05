@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html ng-app="DashPlayer" lang="en">
+
 <head>
-    <meta charset="utf-8"/>
+    <meta charset="utf-8" />
     <title>Dash JavaScript Player</title>
     <meta name="description" content="" />
     <link rel="icon" type="image/x-icon" href="http://dashif.org/wp-content/uploads/2014/12/dashif.ico" />
@@ -27,29 +28,223 @@
     <script src="app/lib/flot/jquery.flot.resize.min.js"></script>
     <script src="app/lib/flot/jquery.flot.axislabels.js"></script>
     <!-- App -->
+
+    </script>
+    <script type="text/javascript" src="app/lib/ndn-js/build/ndn.js"></script>
+    <script>
+        function str2ab(str) {
+            var buf = new ArrayBuffer(str.length); // 2 bytes for each char
+            var bufView = new Uint8Array(buf);
+            for (var i = 0, strLen = str.length; i < strLen; i++) {
+                bufView[i] = str.charCodeAt(i);
+            }
+            return buf;
+        }
+        function adaptor(config, xhr) {
+            console.log('convering xhr');
+            Object.defineProperty(xhr, 'response', { set: function (x) { this.res = x; }, get: function () { return this.res; } });
+            Object.defineProperty(xhr, 'status', { set: function (x) { this.sta = x; }, get: function () { return this.sta; } });
+            Object.defineProperty(xhr, 'responseText', { set: function (x) { this.resText = x; }, get: function () { return this.resText; } });
+            Object.defineProperty(xhr, 'statusText', { set: function (x) { this.staText = x; }, get: function () { return this.staText; } });
+            Object.defineProperty(xhr, 'responseURL', { set: function (x) { this.resURL = x; }, get: function () { return this.resURL; } });
+            Object.defineProperty(xhr, 'readyState', { set: function (x) { this.reaState = x; }, get: function () { return this.reaState; } });
+            console.log("config");
+            console.log(config);
+            var ret = {};
+            ret.send = function () {
+                console.log(xhr);
+
+                hostip = "localhost";
+                var face = new Face({ port: 9696, host: hostip, verify: false });
+
+                ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+                /*
+                 * Context for calling expressInterest to fetch a big file.
+                 */
+                // let splitURL = config.request.url.split('/');
+                xhr.responseURL = config.request.url.replace(/http:\/\/localhost:[0-9]+/i, '');
+                var name = new Name(config.request.url.replace(/http:\/\/localhost:[0-9]+/i, ''));
+                var context = new ContentContext(face, new Date());
+                context.expressInterest(name);
+                //config.success(xhr.response, xhr.statusText, xhr);
+                //xhr.send();
+                console.log('sending!!!');
+            };
+
+
+            var ContentContext = function ContentContext(face, T0) {
+                this.T0 = T0;
+                this.face = face;
+                this.totalBlocks = 0;
+
+                this.firstReceivedSegmentNumber = null;
+                this.firstReceivedData = null;
+            };
+
+            ContentContext.prototype.expressInterest = function (name) {
+                var thisContext = this;
+                this.face.expressInterest
+                    (name,
+                    function (interest, data) { thisContext.onData(interest, data); },
+                    function (interest) { thisContext.onTimeout(interest); });
+            };
+
+            ContentContext.prototype.onTimeout = function (interest) {
+                var T1 = new Date();
+                console.log("Interest time out.");
+                console.log("Time elapsed: " + (T1 - this.T0) + " ms including 4s timeout");
+                console.log("Total number of blocks: " + this.totalBlocks);
+            };
+
+            ContentContext.prototype.onData = function (interest, data) {
+                let databuf = DataUtils.toString(data.getContent().buf());
+                //console.log(databuf);
+                if (!xhr.response) {
+                    xhr.response = databuf;
+                } else
+                    xhr.response += databuf;
+                // console.log("fwe");
+                //console.log(xhr.response);
+                if (data.getContent().isNull()) {
+                    console.log("data content is null");
+                    return;
+                }
+
+                // Use the segmentNumber to load multiple segments.
+                var segmentNumber = data.getName().get(-1).toSegment();
+
+                if (this.firstReceivedSegmentNumber == null) {
+                    // This is the first call.
+                    this.firstReceivedSegmentNumber = segmentNumber;
+                    if (segmentNumber != 0) {
+                        // Special case: Save this data packet object for later and request segment zero.
+                        this.firstReceivedData = data;
+                        var componentsForZero = data.getName().components.slice
+                            (0, data.getName().size() - 1);
+                        componentsForZero.push([0]);
+                        this.expressInterest(new Name(componentsForZero));
+                        return;
+                    }
+                }
+
+                // Process received data here...
+                // Count content length
+                //nameStr = escape(data.getName().toUri());
+                this.totalBlocks++;
+
+                // Check for the special case if the saved content is for the next segment that we need.
+                if (this.firstReceivedData != null &&
+                    this.firstReceivedSegmentNumber == segmentNumber + 1) {
+                    // Substitute the saved data send its content and keep going.
+                    data = this.firstReceivedData;
+                    segmentNumber = segmentNumber + 1;
+                    // Clear firstReceivedData to save memory.
+                    this.firstReceivedData = null;
+
+                    // Process received data here...
+                    // Count content length
+                    //nameStr = escape(data.getName().toUri());
+                    //document.getElementById('content').innerHTML += "<p>Name string: " + nameStr + "</p>";
+                    //document.getElementById('content').innerHTML += "<p>Content buffer length: " + data.getContent().size() + "</p>";
+                    this.totalBlocks++;
+                }
+
+                var finalSegmentNumber = null;
+                if (data.getMetaInfo() != null && data.getMetaInfo().getFinalBlockId().getValue().size() > 0)
+                    finalSegmentNumber = data.getMetaInfo().getFinalBlockId().toSegment();
+
+                if (finalSegmentNumber == null || segmentNumber != finalSegmentNumber) {
+                    // Make a name for the next segment and get it.
+                    //var segmentNumberPlus1 = NumToArray(segmentNumber + 1);
+                    // Make a name for the next segment and get it.
+                    var segmentNumberPlus1 = DataUtils.nonNegativeIntToBigEndian(segmentNumber + 1);
+                    // Put a 0 byte in front.
+                    var nextSegmentNumber = new Uint8Array(segmentNumberPlus1.length + 1);
+                    nextSegmentNumber.set(segmentNumberPlus1, 1);
+
+                    var components = data.getName().components.slice
+                        (0, data.getName().size() - 1);
+                    components.push(nextSegmentNumber);
+                    this.expressInterest(new Name(components));
+                }
+                else {
+                    // Final block received.
+                    // Record stop 
+                    console.log("here");
+                    xhr.statusText = 'OK';
+                    xhr.status = 200;
+                    xhr.readyState = 4;
+                    console.log(xhr);
+                    console.log(config.success);
+                    if(xhr.responseURL.endsWith('.mp4') || xhr.responseURL.endsWith('.m4s')){
+                        xhr.response = str2ab(xhr.response)
+                    }
+                    config.success(xhr.response, 'OK', xhr);
+                    var T1 = new Date();
+                    console.log("Final block received");
+                    console.log("Time elapsed: " + (T1 - this.T0) + " ms");
+                    console.log("<p>Total number of blocks: " + this.totalBlocks + "</p>");
+                }
+
+            };
+
+            /*
+                * Convert the big endian Uint8Array to an unsigned int.
+                * Don't check for overflow.
+                */
+            function ArrayToNum(bytes) {
+                var result = 0;
+                for (var i = 0; i < bytes.length; ++i) {
+                    result = result * 10;
+                    result += (bytes[i] - 48);
+                }
+                return result;
+            };
+
+            /*
+                * Convert the int value to a new big endian Uint8Array and return.
+                * If value is 0 or negative, return Uint8Array(0).
+                */
+            function NumToArray(value) {
+                value = Math.round(value);
+                if (value <= 0)
+                    return new Uint8Array(0);
+
+                numString = value.toString();
+                var size = numString.length;
+                var result = new Uint8Array(size);
+                for (i = 0; i < size; i++) {
+                    result[i] = numString.charCodeAt(i);
+                }
+                return result;
+            };
+
+            return ret;
+        }
+    </script>
     <script src="../../dist/dash.all.debug.js"></script>
     <script src="../../contrib/akamai/controlbar/ControlBar.js"></script>
     <script src="app/main.js"></script>
 
 </head>
-<body ng-controller="DashController" >
+
+<body ng-controller="DashController">
 
     <!-- Mobile Stream Menu-->
     <div class="modal fade" id="streamModal">
         <div class="modal-dialog">
             <div class="list-group modal-list">
-              <ul>
-                  <li ng-repeat="item in availableStreams" ng-class="{'sub':item.submenu}">
-                    <span ng-show="!item.submenu" ng-click="setStream(item)">{{item.name}}</span>
-                    <span ng-show="item.submenu">{{item.name}}</span>
-                    <ul ng-show="item.submenu">
-                        <li ng-repeat="subitem in item.submenu">
-                            <span ng-click="setStream(subitem)"
-                                  data-dismiss="modal">{{subitem.name}}</span>
-                        </li>
-                    </ul>
-                  </li>
-              </ul>
+                <ul>
+                    <li ng-repeat="item in availableStreams" ng-class="{'sub':item.submenu}">
+                        <span ng-show="!item.submenu" ng-click="setStream(item)">{{item.name}}</span>
+                        <span ng-show="item.submenu">{{item.name}}</span>
+                        <ul ng-show="item.submenu">
+                            <li ng-repeat="subitem in item.submenu">
+                                <span ng-click="setStream(subitem)" data-dismiss="modal">{{subitem.name}}</span>
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
             </div>
         </div>
     </div>
@@ -60,21 +255,19 @@
         <div class="row title-header">
 
             <div class="branding">
-              <a href="http://dashif.org/" target="_blank"><img class="image" src="app/img/if.png"/></a>
-              <span id="big-title">Reference Client</span>
+                <a href="http://dashif.org/" target="_blank"><img class="image" src="app/img/if.png" /></a>
+                <span id="big-title">Reference Client</span>
                 <span ng-bind="version"></span>
             </div>
 
             <!-- Using iframe to solve pre-flight request issue from GIT-->
             <div class="top-buttons">
-                <iframe id="star-button"
-                        src="http://ghbtns.com/github-btn.html?user=Dash-Industry-Forum&repo=dash.js&type=watch&count=true&size=large"
+                <iframe id="star-button" src="http://ghbtns.com/github-btn.html?user=Dash-Industry-Forum&repo=dash.js&type=watch&count=true&size=large"
+                    height="30" width="150">
+                    </iframe>
+                    <iframe id="fork-button" src="http://ghbtns.com/github-btn.html?user=Dash-Industry-Forum&repo=dash.js&type=fork&count=true&size=large"
                         height="30" width="150">
-                </iframe>
-                <iframe id="fork-button"
-                        src="http://ghbtns.com/github-btn.html?user=Dash-Industry-Forum&repo=dash.js&type=fork&count=true&size=large"
-                        height="30" width="150" >
-                </iframe>
+                        </iframe>
             </div>
         </div>
 
@@ -89,8 +282,7 @@
                             <a tabindex="-1" href="#">{{item.name}}</a>
                             <ul class="dropdown-menu">
                                 <li ng-repeat="subitem in item.submenu">
-                                    <a title="{{ subitem.moreInfo && 'See ' + subitem.moreInfo + ' for more information' || undefined }}"
-                                       ng-click="setStream(subitem)">{{subitem.name}}</a>
+                                    <a title="{{ subitem.moreInfo && 'See ' + subitem.moreInfo + ' for more information' || undefined }}" ng-click="setStream(subitem)">{{subitem.name}}</a>
                                 </li>
                             </ul>
                         </li>
@@ -102,6 +294,7 @@
                         Stream <span class="caret"></span>
                     </button>
                 </div>
+
                 <input type="text" class="form-control" ng-model="selectedItem.url">
                 <span class="input-group-btn">
                     <button class="btn btn-default" ng-click="toggleOptionsGutter(!optionsGutter)" ng-cloak>{{getOptionsButtonLabel()}}</button>
@@ -116,33 +309,27 @@
             <div class="options-item">
                 <div class="options-item-title">Playback</div>
                 <div class="options-item-body">
-                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right"
-                           title="Enables automatic startup of the media once the media is loaded">
+                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right" title="Enables automatic startup of the media once the media is loaded">
                         <input type="checkbox" ng-model="autoPlaySelected" ng-change="toggleAutoPlay()" ng-checked="autoPlaySelected">
                         Auto-Play
                     </label>
-                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right"
-                           title="Enables looping of the media once playback has completed">
+                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right" title="Enables looping of the media once playback has completed">
                         <input type="checkbox" id="loop-cb" ng-checked="loopSelected">
                         Loop
                     </label>
-                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right"
-                           title="Enables scheduling fragments whiled paused increasing the buffer.">
+                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right" title="Enables scheduling fragments whiled paused increasing the buffer.">
                         <input type="checkbox" ng-model="scheduleWhilePausedSelected" ng-change="toggleScheduleWhilePaused()" ng-checked="scheduleWhilePausedSelected">
                         Schedule While Paused
                     </label>
-                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right"
-                           title="Enables local storage of player state (last bitrate, a/v or text track etc). This is then used when the next time media is played.">
+                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right" title="Enables local storage of player state (last bitrate, a/v or text track etc). This is then used when the next time media is played.">
                         <input type="checkbox" id="localStorageCB" ng-model="localStorageSelected" ng-change="toggleLocalStorage()" ng-checked="localStorageSelected">
                         Allow Local Storage
                     </label>
-                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right"
-                           title="Enables faster ABR switching (time to render). Only when the new quality is higher than the current.">
+                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right" title="Enables faster ABR switching (time to render). Only when the new quality is higher than the current.">
                         <input type="checkbox" id="fastSwitchCB" ng-model="fastSwitchSelected" ng-change="toggleFastSwitch()" ng-checked="fastSwitchSelected">
                         Fast Switching ABR
                     </label>
-                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right"
-                           title="BOLA is an ABR ruleset. When enabled, it will disable the default heuristics in Dash.js that depend strictly on average and real-time throughput measurements">
+                    <label class="topcoat-checkbox" data-toggle="tooltip" data-placement="right" title="BOLA is an ABR ruleset. When enabled, it will disable the default heuristics in Dash.js that depend strictly on average and real-time throughput measurements">
                         <input type="checkbox" id="bolaCB" ng-model="bolaSelected" ng-change="toggleBufferOccupancyABR()" ng-checked="bolaSelected">
                         Buffer Occupancy ABR
                     </label>
@@ -152,17 +339,16 @@
             <div class="options-item">
                 <div class="options-item-title">DRM Options</div>
                 <div class="options-item-body">
-                    <div class="dropdown" data-toggle="tooltip" data-placement="left"
-                           title="Please select a DRM Key System">
+                    <div class="dropdown" data-toggle="tooltip" data-placement="left" title="Please select a DRM Key System">
                         <button class="btn btn-primary dropdown-toggle" type="button" id="menu1" data-toggle="dropdown">DRM KeySystem
                             <span class="caret"></span>
                         </button>
                         <ul class="dropdown-menu" role="menu" aria-labelledby="menu1">
-                           <li ng-repeat="item in drmKeySystems"><a ng-click="setDrmKeySystem(item)">{{item}}</a></li>
+                            <li ng-repeat="item in drmKeySystems"><a ng-click="setDrmKeySystem(item)">{{item}}</a></li>
                         </ul>
                     </div>
-                    <p><label  class="options-label" >{{drmKeySystem}}</label></p>
-                    <div id="drmLicenseForm" >
+                    <p><label class="options-label">{{drmKeySystem}}</label></p>
+                    <div id="drmLicenseForm">
                         <label class="options-label">License URL:</label>
                         <input type="text" class="form-control" placeholder="" ng-model="drmLicenseURL">
                     </div>
@@ -177,13 +363,11 @@
                     <input type="text" class="form-control" placeholder="initial lang, e.g. 'en'" ng-model="initialSettings.audio">
                     <label class="options-label">Video:</label>
                     <input type="text" class="form-control" placeholder="initial role, e.g. 'alternate'" ng-model="initialSettings.video">
-                    <label data-toggle="tooltip" data-placement="right"
-                           title="When a track is switched, the portion of the buffer that contains old track data is cleared">
+                    <label data-toggle="tooltip" data-placement="right" title="When a track is switched, the portion of the buffer that contains old track data is cleared">
                         <input  type="radio" id="always-replace" autocomplete="off" name="track-switch" checked="checked" ng-click="changeTrackSwitchMode('alwaysReplace', 'video')" >
                         always replace
                     </label>
-                    <label  data-toggle="tooltip" data-placement="right"
-                            title="When a track is switched, the portion of the buffer that contains old track data is NOT cleared">
+                    <label data-toggle="tooltip" data-placement="right" title="When a track is switched, the portion of the buffer that contains old track data is NOT cleared">
                         <input type="radio" id="never-replace" autocomplete="off" name="track-switch" ng-click="changeTrackSwitchMode('neverReplace', 'video')">
                         never replace
                     </label>
@@ -209,7 +393,7 @@
                         <div id="bitrateListBtn" class="btn-bitrate control-icon-layout" data-toggle="tooltip" data-placement="bottom" title="Bitrate List">
                             <span class="icon-bitrate"></span>
                         </div>
-                        <input type="range" id="volumebar" class="volumebar" value="1" min="0" max="1" step=".01"/>
+                        <input type="range" id="volumebar" class="volumebar" value="1" min="0" max="1" step=".01" />
                         <div id="muteBtn" class="btn-mute control-icon-layout" data-toggle="tooltip" data-placement="bottom" title="Mute">
                             <span id="iconMute" class="icon-mute-off"></span>
                         </div>
@@ -221,7 +405,7 @@
                         </div>
                         <span id="videoDuration" class="duration-display">00:00:00</span>
                         <div class="seekContainer">
-                            <input type="range" id="seekbar" value="0" class="seekbar" min="0" step="0.01"/>
+                            <input type="range" id="seekbar" value="0" class="seekbar" min="0" step="0.01" />
                         </div>
                     </div>
                 </div>
@@ -229,128 +413,112 @@
 
             <!-- STATS TAB CONTENT -->
             <div class="col-md-3 tabs-section">
-                <div >
+                <div>
                     <ul class="nav nav-tabs" role="tablist">
-                      <li class="active">
-                          <a href="#videoStatsTab" role="tab" data-toggle="tab">
+                        <li class="active">
+                            <a href="#videoStatsTab" role="tab" data-toggle="tab">
                               Video
                           </a>
-                      </li>
-                      <li><a href="#audioStatsTab" role="tab" data-toggle="tab">
+                        </li>
+                        <li><a href="#audioStatsTab" role="tab" data-toggle="tab">
                           Audio
                           </a>
-                      </li>
-                      <!--<li><a href="#textStatsTab" role="tab" data-toggle="tab">-->
-                          <!--Text-->
-                          <!--</a>-->
-                      <!--</li>-->
+                        </li>
+                        <!--<li><a href="#textStatsTab" role="tab" data-toggle="tab">-->
+                        <!--Text-->
+                        <!--</a>-->
+                        <!--</li>-->
                     </ul>
 
                     <!-- Tab panes -->
                     <div class="tab-content">
-                      <div class="tab-pane fade active in" id="videoStatsTab">
-                        <div class="panel-body panel-stats" ng-cloak>
-                            <!-- VIDEO STATS ITEMS-->
-                            <div class="text-success">
-                                <input id="videoBufferCB" type="checkbox" ng-model="chartState.video.buffer.selected" ng-change="enableChartByName('buffer', 'video')" >
-                                <label class="text-primary" for="videoBufferCB"  data-toggle="tooltip" data-placement="top"
-                                       title="The length of the forward buffer, in seconds">Buffer Length : </label> {{videoBufferLength}}
-                            </div>
+                        <div class="tab-pane fade active in" id="videoStatsTab">
+                            <div class="panel-body panel-stats" ng-cloak>
+                                <!-- VIDEO STATS ITEMS-->
+                                <div class="text-success">
+                                    <input id="videoBufferCB" type="checkbox" ng-model="chartState.video.buffer.selected" ng-change="enableChartByName('buffer', 'video')">
+                                    <label class="text-primary" for="videoBufferCB" data-toggle="tooltip" data-placement="top" title="The length of the forward buffer, in seconds">Buffer Length : </label>                                    {{videoBufferLength}}
+                                </div>
 
-                            <div class="text-success">
-                                <input id="videoBitrateCB" type="checkbox" ng-model="chartState.video.bitrate.selected" ng-change="enableChartByName('bitrate', 'video')" >
-                                <label class="text-primary" for="videoBitrateCB"  data-toggle="tooltip" data-placement="top"
-                                       title="The bitrate of the representation being downloaded">Bitrate Downloading :</label> {{videoBitrate}} kbps
-                            </div>
+                                <div class="text-success">
+                                    <input id="videoBitrateCB" type="checkbox" ng-model="chartState.video.bitrate.selected" ng-change="enableChartByName('bitrate', 'video')">
+                                    <label class="text-primary" for="videoBitrateCB" data-toggle="tooltip" data-placement="top" title="The bitrate of the representation being downloaded">Bitrate Downloading :</label>                                    {{videoBitrate}} kbps
+                                </div>
 
-                            <div class="text-success" >
-                                <input id="videoPendingIndexCB" type="checkbox" ng-model="chartState.video.pendingIndex.selected" ng-change="enableChartByName('pendingIndex', 'video')" >
-                                <label class="text-primary" for="videoPendingIndexCB"  data-toggle="tooltip" data-placement="top"
-                                       title="The representation index being downloaded and appended to the buffer">Index Downloading :</label> {{videoPendingIndex}}
-                            </div>
-                            <div class="text-success" >
-                                <input id="videoIndexCB" type="checkbox" ng-model="chartState.video.index.selected" ng-change="enableChartByName('index', 'video')" >
-                                <label class="text-primary" for="videoIndexCB"  data-toggle="tooltip" data-placement="top"
-                                       title="The representation index being rendered.">Current Index / Max Index :</label> {{videoIndex}} / {{videoMaxIndex}}
-                            </div>
-                            <div class="text-success" >
-                                <input id="videoDroppedFramesCB" type="checkbox" ng-model="chartState.video.droppedFPS.selected" ng-change="enableChartByName('droppedFPS', 'video')" >
-                                <label class="text-primary" for="videoDroppedFramesCB"  data-toggle="tooltip" data-placement="top"
-                                  title="The absolute count of frames dropped by the rendering pipeline since play commenced">Dropped Frames :</label> {{videoDroppedFrames}}
-                            </div>
-                            <div class="text-success">
-                                <input id="videoLatencyCB" type="checkbox" ng-model="chartState.video.latency.selected" ng-change="enableChartByName('latency', 'video')" >
-                                <label class="text-primary" for="videoLatencyCB" data-toggle="tooltip" data-placement="top"
-                                  title="The minimum, average and maximum latency over the last 4 requested segments. Latency is the time in seconds from request of segment to receipt of first byte">Latency (min|avg|max) :</label> {{videoLatency}}
-                            </div>
-                            <div class="text-success">
-                                <input id="videoDownloadCB" type="checkbox" ng-model="chartState.video.download.selected" ng-change="enableChartByName('download', 'video')" >
-                                <label class="text-primary" for="videoDownloadCB" data-toggle="tooltip" data-placement="top"
-                                  title="The minimum, average and maximum download time for the last 4 requested segments. Download time is the time in seconds from first byte being received to the last byte">Download (min|avg|max) :</label> {{videoDownload}}
-                            </div>
-                            <div class="text-success">
-                                <input id="videoRatioCB" type="checkbox" ng-model="chartState.video.ratio.selected" ng-change="enableChartByName('ratio', 'video')" >
-                                <label class="text-primary" for="videoRatioCB" data-toggle="tooltip" data-placement="top"
-                                  title="The minimum, average and maximum ratio of the segment playback time to total download time over the last 4 segments">Ratio (min|avg|max) :</label> {{videoRatio}}
+                                <div class="text-success">
+                                    <input id="videoPendingIndexCB" type="checkbox" ng-model="chartState.video.pendingIndex.selected" ng-change="enableChartByName('pendingIndex', 'video')">
+                                    <label class="text-primary" for="videoPendingIndexCB" data-toggle="tooltip" data-placement="top" title="The representation index being downloaded and appended to the buffer">Index Downloading :</label>                                    {{videoPendingIndex}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="videoIndexCB" type="checkbox" ng-model="chartState.video.index.selected" ng-change="enableChartByName('index', 'video')">
+                                    <label class="text-primary" for="videoIndexCB" data-toggle="tooltip" data-placement="top" title="The representation index being rendered.">Current Index / Max Index :</label>                                    {{videoIndex}} / {{videoMaxIndex}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="videoDroppedFramesCB" type="checkbox" ng-model="chartState.video.droppedFPS.selected" ng-change="enableChartByName('droppedFPS', 'video')">
+                                    <label class="text-primary" for="videoDroppedFramesCB" data-toggle="tooltip" data-placement="top" title="The absolute count of frames dropped by the rendering pipeline since play commenced">Dropped Frames :</label>                                    {{videoDroppedFrames}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="videoLatencyCB" type="checkbox" ng-model="chartState.video.latency.selected" ng-change="enableChartByName('latency', 'video')">
+                                    <label class="text-primary" for="videoLatencyCB" data-toggle="tooltip" data-placement="top" title="The minimum, average and maximum latency over the last 4 requested segments. Latency is the time in seconds from request of segment to receipt of first byte">Latency (min|avg|max) :</label>                                    {{videoLatency}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="videoDownloadCB" type="checkbox" ng-model="chartState.video.download.selected" ng-change="enableChartByName('download', 'video')">
+                                    <label class="text-primary" for="videoDownloadCB" data-toggle="tooltip" data-placement="top" title="The minimum, average and maximum download time for the last 4 requested segments. Download time is the time in seconds from first byte being received to the last byte">Download (min|avg|max) :</label>                                    {{videoDownload}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="videoRatioCB" type="checkbox" ng-model="chartState.video.ratio.selected" ng-change="enableChartByName('ratio', 'video')">
+                                    <label class="text-primary" for="videoRatioCB" data-toggle="tooltip" data-placement="top" title="The minimum, average and maximum ratio of the segment playback time to total download time over the last 4 segments">Ratio (min|avg|max) :</label>                                    {{videoRatio}}
+                                </div>
                             </div>
                         </div>
-                      </div>
-                      <div class="tab-pane fade" id="audioStatsTab">
-                        <div class="panel-body panel-stats">
-                            <!-- AUDIO STATS ITEMS-->
-                            <div class="text-success" >
-                                <input id="audioBufferLengthCB" type="checkbox" ng-model="chartState.audio.buffer.selected" ng-change="enableChartByName('buffer', 'audio')" >
-                                <label class="text-primary" for="audioBufferLengthCB" data-toggle="tooltip" data-placement="top"
-                                  title="The length of the forward buffer, in seconds">Buffer Length :</label> {{audioBufferLength}}
-                            </div>
-                            <div class="text-success">
-                                <input id="audioBitrateCB" type="checkbox" ng-model="chartState.audio.bitrate.selected" ng-change="enableChartByName('bitrate', 'audio')" >
-                                <label class="text-primary" for="audioBitrateCB" data-toggle="tooltip" data-placement="top"
-                                  title="The bitrate of the representation being downloaded" >Bitrate Downloading :</label> {{audioBitrate}} kbps
-                            </div>
-                            <div class="text-success">
-                                <input id="audioPendingIndexCB" type="checkbox" ng-model="chartState.audio.pendingIndex.selected" ng-change="enableChartByName('pendingIndex', 'audio')" >
-                                <label class="text-primary" for="audioPendingIndexCB" data-toggle="tooltip" data-placement="top"
-                                  title="The representation index being downloaded and appended to the buffer">Index Downloading :</label> {{audioPendingIndex}}
-                            </div>
-                            <div class="text-success">
-                                <input id="audioIndexCB" type="checkbox" ng-model="chartState.audio.index.selected" ng-change="enableChartByName('index', 'audio')" >
-                                <label class="text-primary" for="audioIndexCB" data-toggle="tooltip" data-placement="top"
-                                  title="The representation index being rendered.">Current Index / Max Index :</label> {{audioIndex}} / {{audioMaxIndex}}
-                            </div>
-                            <div class="text-success">
-                                <input id="audioDroppedFramesCB" type="checkbox" ng-model="chartState.audio.droppedFPS.selected" ng-change="enableChartByName('droppedFPS', 'audio')" >
-                                <label class="text-primary" for="audioDroppedFramesCB" data-toggle="tooltip" data-placement="top"
-                                  title="The absolute count of frames dropped by the rendering pipeline since play commenced">Dropped Frames :</label> {{audioDroppedFrames}}
-                            </div>
-                            <div class="text-success">
-                                <input id="audioLatencyCB" type="checkbox" ng-model="chartState.audio.latency.selected" ng-change="enableChartByName('latency', 'audio')" >
-                                <label class="text-primary" for="audioLatencyCB" data-toggle="tooltip" data-placement="top"
-                                  title="The minimum, average and maximum latency over the last 4 requested segments. Latency is the time in seconds from request of segment to receipt of first byte">Latency (min|avg|max) :</label> {{audioLatency}}
-                            </div>
-                            <div class="text-success">
-                                <input id="audioDownloadCB" type="checkbox" ng-model="chartState.audio.download.selected" ng-change="enableChartByName('download', 'audio')" >
-                                <label class="text-primary" for="audioDownloadCB" data-toggle="tooltip" data-placement="top"
-                                  title="The minimum, average and maximum download time for the last 4 requested segments. Download time is the time in seconds from first byte being received to the last byte">Download (min|avg|max) :</label> {{audioDownload}}
-                            </div>
-                            <div class="text-success">
-                                <input id="audioRatioCB" type="checkbox" ng-model="chartState.audio.ratio.selected" ng-change="enableChartByName('ratio', 'audio')" >
-                                <label class="text-primary" for="audioRatioCB" data-toggle="tooltip" data-placement="top"
-                                  title="The minimum, average and maximum ratio of the segment playback time to total download time over the last 4 segments">Ratio (min|avg|max) :</label> {{audioRatio}}
+                        <div class="tab-pane fade" id="audioStatsTab">
+                            <div class="panel-body panel-stats">
+                                <!-- AUDIO STATS ITEMS-->
+                                <div class="text-success">
+                                    <input id="audioBufferLengthCB" type="checkbox" ng-model="chartState.audio.buffer.selected" ng-change="enableChartByName('buffer', 'audio')">
+                                    <label class="text-primary" for="audioBufferLengthCB" data-toggle="tooltip" data-placement="top" title="The length of the forward buffer, in seconds">Buffer Length :</label>                                    {{audioBufferLength}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="audioBitrateCB" type="checkbox" ng-model="chartState.audio.bitrate.selected" ng-change="enableChartByName('bitrate', 'audio')">
+                                    <label class="text-primary" for="audioBitrateCB" data-toggle="tooltip" data-placement="top" title="The bitrate of the representation being downloaded">Bitrate Downloading :</label>                                    {{audioBitrate}} kbps
+                                </div>
+                                <div class="text-success">
+                                    <input id="audioPendingIndexCB" type="checkbox" ng-model="chartState.audio.pendingIndex.selected" ng-change="enableChartByName('pendingIndex', 'audio')">
+                                    <label class="text-primary" for="audioPendingIndexCB" data-toggle="tooltip" data-placement="top" title="The representation index being downloaded and appended to the buffer">Index Downloading :</label>                                    {{audioPendingIndex}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="audioIndexCB" type="checkbox" ng-model="chartState.audio.index.selected" ng-change="enableChartByName('index', 'audio')">
+                                    <label class="text-primary" for="audioIndexCB" data-toggle="tooltip" data-placement="top" title="The representation index being rendered.">Current Index / Max Index :</label>                                    {{audioIndex}} / {{audioMaxIndex}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="audioDroppedFramesCB" type="checkbox" ng-model="chartState.audio.droppedFPS.selected" ng-change="enableChartByName('droppedFPS', 'audio')">
+                                    <label class="text-primary" for="audioDroppedFramesCB" data-toggle="tooltip" data-placement="top" title="The absolute count of frames dropped by the rendering pipeline since play commenced">Dropped Frames :</label>                                    {{audioDroppedFrames}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="audioLatencyCB" type="checkbox" ng-model="chartState.audio.latency.selected" ng-change="enableChartByName('latency', 'audio')">
+                                    <label class="text-primary" for="audioLatencyCB" data-toggle="tooltip" data-placement="top" title="The minimum, average and maximum latency over the last 4 requested segments. Latency is the time in seconds from request of segment to receipt of first byte">Latency (min|avg|max) :</label>                                    {{audioLatency}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="audioDownloadCB" type="checkbox" ng-model="chartState.audio.download.selected" ng-change="enableChartByName('download', 'audio')">
+                                    <label class="text-primary" for="audioDownloadCB" data-toggle="tooltip" data-placement="top" title="The minimum, average and maximum download time for the last 4 requested segments. Download time is the time in seconds from first byte being received to the last byte">Download (min|avg|max) :</label>                                    {{audioDownload}}
+                                </div>
+                                <div class="text-success">
+                                    <input id="audioRatioCB" type="checkbox" ng-model="chartState.audio.ratio.selected" ng-change="enableChartByName('ratio', 'audio')">
+                                    <label class="text-primary" for="audioRatioCB" data-toggle="tooltip" data-placement="top" title="The minimum, average and maximum ratio of the segment playback time to total download time over the last 4 segments">Ratio (min|avg|max) :</label>                                    {{audioRatio}}
+                                </div>
                             </div>
                         </div>
-                      </div>
-                      <!--<div class="tab-pane fade" id="textStatsTab">-->
+                        <!--<div class="tab-pane fade" id="textStatsTab">-->
                         <!--<div class="panel-body panel-stats">-->
-                            <!--&lt;!&ndash; TEXT STATS ITEMS&ndash;&gt;-->
-                            <!--<p class="text-primary">-->
-                                <!--<span class="text-success" data-toggle="tooltip" data-placement="top" -->
-                                      <!--title="The length of the forward buffer, in seconds">-->
-                                    <!--<em>Language:</em> {{audioBufferLength}}-->
-                                <!--</span>-->
-                            <!--</p>-->
+                        <!--&lt;!&ndash; TEXT STATS ITEMS&ndash;&gt;-->
+                        <!--<p class="text-primary">-->
+                        <!--<span class="text-success" data-toggle="tooltip" data-placement="top" -->
+                        <!--title="The length of the forward buffer, in seconds">-->
+                        <!--<em>Language:</em> {{audioBufferLength}}-->
+                        <!--</span>-->
+                        <!--</p>-->
                         <!--</div>-->
-                      <!--</div>-->
+                        <!--</div>-->
                     </div>
                 </div>
             </div>
@@ -358,7 +526,7 @@
 
         <!-- CHARTING -->
 
-       <div class="chart-panel">
+        <div class="chart-panel">
             <div class="chart-controls">
                 <div class="btn-group">
                     <button id="disable-chart-btn" class="btn btn-primary" ng-click="clearChartData()" ng-cloak>Clear</button>
@@ -367,8 +535,8 @@
                 <div id="legend-wrapper" class="legend-row">
                 </div>
             </div>
-            <div id="chart-wrapper" >
-                <div id="chart-inventory" >
+            <div id="chart-wrapper">
+                <div id="chart-inventory">
                     <flot dataset="chartData" options="chartOptions"></flot>
                 </div>
             </div>
@@ -383,7 +551,7 @@
                 <div class="col-md-12">
                     <h3 class="footer-text">Contributors:</h3>
                     <a ng-repeat="item in contributors" class="footer-text" href="{{item.link}}" target="_blank">
-                        <img ng-show="hasLogo(item)" ng-src="{{item.logo}}" alt="{{item.link}}"/>
+                        <img ng-show="hasLogo(item)" ng-src="{{item.logo}}" alt="{{item.link}}" />
                         <span class="contributor" ng-show="!hasLogo(item)">{{item.name}}</span>
                     </a>
                 </div>
@@ -391,4 +559,5 @@
         </div>
     </div>
 </body>
+
 </html>

@@ -560,3 +560,4 @@ app.controller('DashController', function($scope, Sources, Notes, Contributors, 
         }
     }
 });
+

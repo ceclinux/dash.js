@@ -44,6 +44,7 @@ function URLUtils() {
 
     const schemeRegex = /^[a-z][a-z0-9+\-.]*:/i;
     const httpUrlRegex = /^https?:\/\//i;
+    const ccnxUrlRegex = /^ccnx?::\/\//i;
     const originRegex = /^([a-z][a-z0-9+\-.]*:\/\/[^\/]+)\/?/i;
 
     /**
@@ -191,7 +192,21 @@ function URLUtils() {
      * @instance
      */
     function isHTTPURL(url) {
+        console.log('isHTTPURL called ');
         return httpUrlRegex.test(url);
+    }
+
+
+    /**
+     * Determines whether the url is an HTTP-URL as defined in ISO/IEC
+     * 23009-1:2014 3.1.15. ie URL with a fixed scheme of http or https
+     * @return {bool}
+     * @param {string} url
+     * @memberof module:URLUtils
+     * @instance
+     */
+    function isCCNXURL(url) {
+        return ccnxUrlRegex.test(url);
     }
 
     /**
@@ -214,6 +229,7 @@ function URLUtils() {
         isRelative:     isRelative,
         isPathAbsolute: isPathAbsolute,
         isHTTPURL:      isHTTPURL,
+        isCCNXURL:      isCCNXURL,
         resolve:        resolve
     };
 

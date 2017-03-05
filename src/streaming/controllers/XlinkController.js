@@ -106,6 +106,7 @@ function XlinkController(config) {
     }
 
     function resolve(elements, type, resolveType) {
+        console.log('resolve');
         var resolveObject = {};
         var element,
             url,
@@ -116,12 +117,17 @@ function XlinkController(config) {
         resolveObject.resolveType = resolveType;
         // If nothing to resolve, directly call allElementsLoaded
         if (resolveObject.elements.length === 0) {
+            console.log(manifest);
+            console.log('Length zero');
             onXlinkAllElementsLoaded(resolveObject);
         }
         for (i = 0; i < resolveObject.elements.length; i++) {
             element = resolveObject.elements[i];
             if (urlUtils.isHTTPURL(element.url)) {
                 url = element.url;
+                console.log('This is HTTP URL');
+            } else if (urlUtils.isCCNXURL(element.url)) {
+                console.log('This is CCNX URL');
             } else {
                 url = element.originalContent.BaseURL + element.url;
             }
@@ -157,15 +163,21 @@ function XlinkController(config) {
         var elements = [];
         var i,
             obj;
-
+        console.log('before');
+        console.log(resolveObject);
         mergeElementsBack(resolveObject);
+        console.log('after');
+        console.log(resolveObject);
         if (resolveObject.resolveType === RESOLVE_TYPE_ONACTUATE) {
+            console.log('RESOLVE_TYPE_ONACTUATE');
             eventBus.trigger(Events.XLINK_READY, {manifest: manifest});
         }
         if (resolveObject.resolveType === RESOLVE_TYPE_ONLOAD) {
+            console.log('RESOLVE_TYPE_ONLOAD');
             switch (resolveObject.type) {
                 // Start resolving the other elements. We can do Adaptation Set and EventStream in parallel
                 case ELEMENT_TYPE_PERIOD:
+                    console.log('ELEMENT_TYPE_PERIOD');
                     for (i = 0; i < manifest[ELEMENT_TYPE_PERIOD + '_asArray'].length; i++) {
                         obj = manifest[ELEMENT_TYPE_PERIOD + '_asArray'][i];
                         if (obj.hasOwnProperty(ELEMENT_TYPE_ADAPTATIONSET + '_asArray')) {
@@ -179,6 +191,8 @@ function XlinkController(config) {
                     break;
                 case ELEMENT_TYPE_ADAPTATIONSET:
                     // TODO: Resolve SegmentList here
+                    console.log('ELEMENT_TYPE_ADAPTATIONSET');
+                    //console.log(manifest);
                     eventBus.trigger(Events.XLINK_READY, {manifest: manifest});
                     break;
             }

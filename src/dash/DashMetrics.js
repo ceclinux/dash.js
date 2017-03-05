@@ -209,7 +209,8 @@ function DashMetrics() {
         if (length <= 0) {
             return null;
         }
-
+        // console.log('matrics');
+        // console.log(metrics);
         return list[length - 1];
     }
 

@@ -1313,6 +1313,8 @@ function MediaPlayer() {
      * @instance
      */
     function retrieveManifest(url, callback) {
+        console.log('manifest url');
+        console.log(url);
         var manifestLoader = createManifestLoader();
         var self = this;
 
